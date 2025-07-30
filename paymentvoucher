@@ -1,0 +1,841 @@
+import React, { useState, useCallback } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  ScrollView,
+  Dimensions,
+  TouchableOpacity,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Modal,
+} from "react-native";
+import MaterialIcons from "react-native-vector-icons/MaterialIcons";
+import DateTimePicker from "@react-native-community/datetimepicker";
+import axios from "axios";
+import { useEffect } from "react";
+import { BASE_URL } from "../Componants/ServerURL";
+import { handleStatusCodeError, isValidUrl } from "../Componants/ErrorHandler";
+import { showConfirmation } from "../Componants/AlertUtils";
+import { useFocusEffect } from "@react-navigation/native";
+import commonStyles, { colors } from "../Componants/CommonStyles";
+import PopupListSelector from "../Componants/PopupListSelector";
+import { isConnectedToInternet } from "../Componants/networkUtils";
+
+const { width, height } = Dimensions.get("window");
+const isTablet = width >= 768;
+
+// Constants
+const ACTIONS = [
+  { key: "create", icon: "add", color: colors.success },
+  { key: "Edit", icon: "edit", color: colors.warning },
+  { key: "delete", icon: "delete", color: colors.danger },
+];
+
+const INITIAL_TABLE_DATA = [
+  {
+    bankCash: "",
+    crDrType: "CR",
+    chqNo: "",
+    chqDt: null, // Use null for no date selected
+    description: "",
+    amount: "",
+  },
+];
+
+// Subcomponents
+const ActionButtons = ({ selectedType, onButtonPress }) => (
+  <View style={styles.ButtonContainer}>
+    {ACTIONS.map(({ key, icon, color }) => {
+      const isActive = selectedType === key;
+      return (
+        <TouchableOpacity
+          key={key}
+          onPress={() => onButtonPress(key)}
+          style={[
+            styles.actionButton,
+            { backgroundColor: isActive ? color : "#f0f0f0" },
+          ]}
+        >
+          <MaterialIcons
+            name={icon}
+            size={18}
+            color={isActive ? "#fff" : "#555"}
+          />
+          <Text
+            style={[
+              styles.actionButtonText,
+              isActive && styles.actionButtonTextActive,
+            ]}
+          >
+            {key.charAt(0).toUpperCase() + key.slice(1)}
+          </Text>
+        </TouchableOpacity>
+      );
+    })}
+  </View>
+);
+
+const InputField = ({
+  label,
+  placeholder,
+  value,
+  onChangeText,
+  editable = true,
+  multiline = false,
+  numberOfLines = 1,
+  style,
+}) => (
+  <View style={[styles.gridItem, style]}>
+    {label && <Text style={styles.label}>{label}</Text>}
+    <TextInput
+      style={[styles.input, multiline && { height: numberOfLines * 20 }]}
+      placeholder={placeholder}
+      placeholderTextColor="#999"
+      value={value}
+      onChangeText={onChangeText}
+      editable={editable}
+      multiline={multiline}
+      numberOfLines={numberOfLines}
+    />
+  </View>
+);
+
+const DateInput = ({ label, value, onPress }) => (
+    <View style={styles.gridItem}>
+        {label && <Text style={styles.label}>{label}</Text>}
+        <TouchableOpacity
+            style={styles.dateInput}
+            onPress={onPress}>
+            <Text style={styles.dateText}>
+                {value ? value.toLocaleDateString() : 'Select Date'}
+            </Text>
+            <MaterialIcons name="calendar-today" size={18} color="#555" />
+        </TouchableOpacity>
+    </View>
+);
+
+const PaymentModeSelector = ({ selectedMode, onSelectMode }) => {
+  return (
+    <View style={[styles.paymentModeContainer]}>
+      <Text style={styles.label}>Payment Mode</Text>
+      <View style={styles.radioGroup}>
+        {["Cash", "Online", "Cheque"].map((mode) => (
+          <TouchableOpacity
+            key={mode}
+            style={[
+              styles.radioButton,
+              selectedMode === mode && styles.radioButtonSelected,
+            ]}
+            onPress={() => onSelectMode(mode)}
+          >
+            <Text
+              style={[
+                styles.radioButtonText,
+                selectedMode === mode && styles.radioButtonTextSelected,
+              ]}
+            >
+              {mode}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+    </View>
+  );
+};
+
+const AddRowButton = ({ onPress }) => (
+  <TouchableOpacity style={styles.addButton} onPress={onPress}>
+    <MaterialIcons name="add" size={18} color="#fff" />
+    <Text style={styles.addButtonText}>Add Row</Text>
+  </TouchableOpacity>
+);
+
+const TableRow = React.memo(({ row, index, deleteRow, openModal }) => (
+  <View style={styles.tableRow}>
+    <Text style={styles.tableInput}>{row.bankCash}</Text>
+    <Text style={styles.tableInput}>{row.crDrType}</Text>
+    <Text style={styles.tableInput}>{row.chqNo}</Text>
+    <Text style={styles.tableInput}>
+      {row.chqDt ? row.chqDt.toLocaleDateString() : ""}
+    </Text>
+    <Text style={styles.tableInput}>{row.description}</Text>
+    <Text style={styles.tableInput}>{row.amount}</Text>
+    <TouchableOpacity
+      style={styles.editButton}
+      onPress={() => openModal(index)}
+    >
+      <MaterialIcons name="edit" size={20} color={colors.warning} />
+    </TouchableOpacity>
+    <TouchableOpacity
+      style={styles.deleteButton}
+      onPress={() => deleteRow(index)}
+    >
+      <MaterialIcons name="delete" size={20} color={colors.danger} />
+    </TouchableOpacity>
+  </View>
+));
+
+const TotalAmount = ({ totalAmount }) => (
+  <View style={styles.totalSection}>
+    <Text style={styles.totalLabel}>Total Amount:</Text>
+    <TextInput
+      style={styles.totalInput}
+      value={totalAmount}
+      editable={false}
+      keyboardType="decimal-pad"
+    />
+  </View>
+);
+
+const SubmitButtons = ({ onSubmit, onClear }) => (
+  <View style={commonStyles.ButtonContainer}>
+    <TouchableOpacity style={[commonStyles.sucessButton]} onPress={onSubmit}>
+      <Text style={{ color: "white", fontWeight: "bold" }}>Submit</Text>
+    </TouchableOpacity>
+    <TouchableOpacity style={[commonStyles.infoButton]} onPress={onClear}>
+      <Text style={{ color: "white", fontWeight: "bold" }}>Clear</Text>
+    </TouchableOpacity>
+  </View>
+);
+
+const PaymentVoucher = () => {
+  const [selectedType, setSelectedType] = useState("create");
+  const [voucherNo, setVoucherNo] = useState("");
+  const [accountName, setAccountName] = useState("");
+  const [balance, setBalance] = useState("0.00");
+  const [tableData, setTableData] = useState(INITIAL_TABLE_DATA);
+  const [totalAmount, setTotalAmount] = useState("0.00");
+  const [voucherDate, setVoucherDate] = useState(new Date());
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [datePickerIndex, setDatePickerIndex] = useState(null); // Track which row's date picker is open
+  const [modalVisible, setModalVisible] = useState(false);
+  const [selectedRowIndex, setSelectedRowIndex] = useState(null);
+  const [tempRowData, setTempRowData] = useState({
+    bankCash: "",
+    crDrType: "CR",
+    chqNo: "",
+    chqDt: null,
+    description: "",
+    amount: "",
+  });
+
+  const [showChequeInputs, setShowChequeInputs] = useState(false);
+  const [chequeNumber, setChequeNumber] = useState("");
+  const [bankName, setBankName] = useState("");
+
+  const ButtonsEvents = useCallback(
+    (BtnEvent) => {
+      setSelectedType(BtnEvent);
+      if (BtnEvent === "create") {
+        ClearItem();
+      }
+    },
+    [ClearItem]
+  );
+
+  const DataHandler = async () => {
+    try {
+      // Your save logic here
+      // Example:
+      // const response = await axios.post(`${BASE_URL}/paymentVouchers`, {
+      //     voucherNo,
+      //     accountName,
+      //     balance,
+      //     tableData,
+      //     totalAmount,
+      //     voucherDate,
+      // });
+      // console.log('Payment voucher saved successfully:', response.data);
+      Alert.alert("Success", "Payment voucher saved successfully!");
+    } catch (error) {
+      console.error("Error saving payment voucher:", error);
+      Alert.alert("Error", "Failed to save payment voucher. Please try again.");
+    }
+  };
+
+  const addRow = useCallback(() => {
+    // Open the modal for a new row
+    openModal(tableData.length); // Pass the index of the new row
+  }, [tableData, openModal]);
+
+  const updateTableData = useCallback(
+    (index, field, value) => {
+      const newData = [...tableData];
+      newData[index][field] = value;
+      setTableData(newData);
+      calculateTotal(newData);
+    },
+    [tableData, calculateTotal]
+  );
+
+  const calculateTotal = useCallback((data) => {
+    const newTotal = data
+      .reduce((acc, row) => acc + parseFloat(row.amount || 0), 0)
+      .toFixed(2);
+    setTotalAmount(newTotal);
+  }, []);
+
+  const ClearItem = useCallback(() => {
+    Alert.alert("Clear Form", "Are you sure you want to clear all data?", [
+      {
+        text: "Cancel",
+        style: "cancel",
+      },
+      {
+        text: "OK",
+        onPress: () => {
+          setVoucherNo("");
+          setAccountName("");
+          setBalance("0.00");
+          setTableData(INITIAL_TABLE_DATA);
+          setTotalAmount("0.00");
+          setVoucherDate(new Date());
+        },
+      },
+    ]);
+  }, []);
+
+  const onDateChange = useCallback((event, selectedDate) => {
+    if (event.type === "set" && selectedDate) {
+      setVoucherDate(selectedDate);
+      setShowDatePicker(false); // Close picker on Android after selection
+    } else if (event.type === "dismissed") {
+      setShowDatePicker(false);
+    } else {
+      setShowDatePicker(Platform.OS === "ios");
+    }
+  }, []);
+
+  const showDatepicker = useCallback(() => {
+    setShowDatePicker(true);
+  }, []);
+
+  const deleteRow = useCallback(
+    (index) => {
+      const newData = [...tableData];
+      newData.splice(index, 1);
+      setTableData(newData);
+      calculateTotal(newData);
+    },
+    [tableData, calculateTotal]
+  );
+
+  // Popup functions
+  const openModal = useCallback(
+    (index) => {
+      setSelectedRowIndex(index);
+      // Initialize tempRowData with empty values if the row is new
+      setTempRowData(
+        tableData[index] || {
+          bankCash: "",
+          crDrType: "CR",
+          chqNo: "",
+          chqDt: null,
+          description: "",
+          amount: "",
+        }
+      );
+      setModalVisible(true);
+    },
+    [tableData]
+  );
+
+  const closeModal = useCallback(() => {
+    setModalVisible(false);
+    setSelectedRowIndex(null);
+    setShowDatePicker(false); // Close date picker when modal is closed
+    setDatePickerIndex(null);
+  }, []);
+
+  const updateTempRowData = useCallback((field, value) => {
+    setTempRowData((prevData) => ({ ...prevData, [field]: value }));
+  }, []);
+
+  const saveRowData = useCallback(() => {
+    if (selectedRowIndex !== null) {
+      const newData = [...tableData];
+      // If the selected row is the last one (newly added), push the new data
+      if (selectedRowIndex === tableData.length) {
+        newData.push({ ...tempRowData });
+      } else {
+        newData[selectedRowIndex] = { ...tempRowData };
+      }
+      setTableData(newData);
+      calculateTotal(newData);
+    }
+    closeModal();
+  }, [tableData, tempRowData, selectedRowIndex, calculateTotal, closeModal]);
+
+  const showTableRowDatePicker = useCallback((index) => {
+    setShowDatePicker(true);
+    setDatePickerIndex(index);
+  }, []);
+
+  const onTableRowDateChange = useCallback(
+    (event, selectedDate) => {
+      const currentDate = selectedDate || new Date();
+      setShowDatePicker(Platform.OS === "ios" ? true : false);
+      if (selectedRowIndex !== null) {
+        setTempRowData((prevData) => ({ ...prevData, chqDt: currentDate }));
+      }
+      setDatePickerIndex(null);
+    },
+    [selectedRowIndex, setTempRowData]
+  );
+
+  const handlePaymentModeSelect = useCallback(
+    (mode) => {
+      updateTempRowData("bankCash", mode);
+      setShowChequeInputs(mode === "Cheque");
+    },
+    [updateTempRowData]
+  );
+
+  return (
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+    >
+      <ScrollView
+        contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={[styles.cardContainer, isTablet && styles.cardTablet]}>
+          {/* Header Section */}
+          <View style={styles.header}>
+            <ActionButtons
+              selectedType={selectedType}
+              onButtonPress={ButtonsEvents}
+            />
+          </View>
+
+          {/* Basic Information Section */}
+          <View style={styles.section}>
+            <View style={styles.gridContainer}>
+              <InputField
+                placeholder="Voucher No"
+                value={voucherNo}
+                onChangeText={setVoucherNo}
+                editable={false}
+              />
+
+              <DateInput value={voucherDate} onPress={showDatepicker} />
+              {showDatePicker && datePickerIndex === null && (
+                <DateTimePicker
+                  testID="dateTimePicker"
+                  value={voucherDate}
+                  mode="date"
+                  display="default"
+                  onChange={onDateChange}
+                />
+              )}
+            </View>
+            <View>
+              <InputField
+                placeholder="Account Name"
+                value={accountName}
+                onChangeText={setAccountName}
+                style={{ width: "100%", flex: 1 }}
+              />
+
+              <View style={styles.gridItem}>
+                <Text style={styles.label}>Balance- {balance}</Text>
+              </View>
+
+              <InputField
+                placeholder="Bank/Cash"
+                value={accountName}
+                onChangeText={setAccountName}
+                style={{ width: "100%", flex: 1 }}
+              />
+
+              <InputField
+                placeholder="Description"
+                value={tempRowData.description}
+                onChangeText={(value) =>
+                  updateTempRowData("description", value)
+                }
+                multiline={true}
+                numberOfLines={4}
+                style={{ width: "100%" }}
+              />
+              <PaymentModeSelector
+                selectedMode={tempRowData.bankCash}
+                onSelectMode={handlePaymentModeSelect}
+              />
+
+              {showChequeInputs && (
+                <>
+                  <InputField
+                    placeholder="Cheque Number"
+                    value={chequeNumber}
+                    onChangeText={setChequeNumber}
+                    style={{ width: "100%", flex: 1 }}
+                  />
+                  <DateInput value={voucherDate} onPress={showDatepicker} />
+                  {showDatePicker && datePickerIndex === null && (
+                    <DateTimePicker
+                      testID="dateTimePicker"
+                      value={voucherDate}
+                      mode="date"
+                      display="default"
+                      onChange={onDateChange}
+                    />
+                  )}
+                </>
+              )}
+
+              <AddRowButton onPress={addRow} />
+            </View>
+          </View>
+
+          <TotalAmount totalAmount={totalAmount} />
+
+          <SubmitButtons onSubmit={DataHandler} onClear={ClearItem} />
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flexGrow: 1,
+    padding: 16,
+    backgroundColor: "#f5f7fa",
+  },
+  cardContainer: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    elevation: 3,
+    marginBottom: 20,
+  },
+  cardTablet: {
+    maxWidth: 1000,
+    alignSelf: "center",
+    width: "90%",
+  },
+  header: {
+    marginBottom: 20,
+  },
+  headerTitle: {
+    fontSize: 22,
+    fontWeight: "bold",
+    color: "#2c3e50",
+    marginBottom: 15,
+  },
+  ButtonContainer: {
+    flexDirection: "row",
+    justifyContent: "flex-start",
+    marginBottom: 10,
+  },
+  actionButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 15,
+    borderRadius: 8,
+    marginRight: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  actionButtonText: {
+    marginLeft: 5,
+    fontSize: 14,
+    fontWeight: "500",
+  },
+  actionButtonTextActive: {
+    color: "#fff",
+  },
+  section: {
+    marginBottom: 20,
+    backgroundColor: "#f9fafc",
+    borderRadius: 10,
+    padding: 15,
+    borderWidth: 1,
+    borderColor: "#eaeef2",
+  },
+  sectionHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 15,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#2c3e50",
+  },
+  gridContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+  },
+  gridItem: {
+    width: "48%",
+    marginBottom: 15,
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#4a5568",
+    marginBottom: 8,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: "#d2d6dc",
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 14,
+    backgroundColor: "#fff",
+    color: "#2d3748",
+  },
+  dateInput: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderWidth: 1,
+    borderColor: "#d2d6dc",
+    borderRadius: 8,
+    padding: 12,
+    backgroundColor: "#fff",
+  },
+  dateText: {
+    color: "#2d3748",
+    fontSize: 14,
+  },
+  addButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.success,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    width: "40%",
+    marginTop: 10,
+  },
+  addButtonText: {
+    color: "#fff",
+    fontWeight: "500",
+    marginLeft: 5,
+  },
+  tableHeader: {
+    flexDirection: "row",
+    backgroundColor: "#edf2f7",
+    paddingVertical: 10,
+    paddingHorizontal: 5,
+    borderTopLeftRadius: 6,
+    borderTopRightRadius: 6,
+    gap: 25,
+  },
+  headerText: {
+    flex: 1,
+    textAlign: "center",
+    fontWeight: "bold",
+    color: "#4a5568",
+    fontSize: 14,
+  },
+  tableRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+    paddingHorizontal: 5,
+    borderBottomWidth: 1,
+    borderBottomColor: "#e2e8f0",
+    backgroundColor: "#fff",
+  },
+  tableInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    borderRadius: 6,
+    padding: 8,
+    marginHorizontal: 3,
+    fontSize: 14,
+    backgroundColor: "#fff",
+    color: "#2d3748",
+    textAlign: "center",
+  },
+  crDrContainer: {
+    flex: 1,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginHorizontal: 3,
+  },
+  crDrButton: {
+    flex: 1,
+    padding: 8,
+    borderRadius: 4,
+    backgroundColor: "#e2e8f0",
+    marginHorizontal: 2,
+  },
+  crDrButtonActive: {
+    backgroundColor: colors.primary,
+  },
+  crDrText: {
+    textAlign: "center",
+    color: "#718096",
+  },
+  crDrTextActive: {
+    color: "#fff",
+    fontWeight: "bold",
+  },
+  deleteButton: {
+    padding: 8,
+    marginLeft: 5,
+  },
+  totalSection: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    alignItems: "center",
+    marginVertical: 15,
+    paddingHorizontal: 10,
+  },
+  totalLabel: {
+    fontSize: 16,
+    fontWeight: "bold",
+    marginRight: 15,
+    color: "#2c3e50",
+  },
+  totalInput: {
+    width: 150,
+    borderWidth: 1,
+    borderColor: "#d2d6dc",
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    fontWeight: "bold",
+    textAlign: "right",
+    backgroundColor: "#fff",
+    color: "#2d3748",
+  },
+  footer: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    marginTop: 20,
+  },
+  buttonText: {
+    color: "#fff",
+    fontWeight: "bold",
+    fontSize: 16,
+  },
+
+  // Modal styles
+  centeredView: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.5)",
+  },
+  modalView: {
+    backgroundColor: "white",
+    borderRadius: 12,
+    padding: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+    width: "90%",
+    maxWidth: 600, // Limit width on larger screens
+  },
+  modalViewTablet: {
+    width: "70%",
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: "bold",
+    marginBottom: 20,
+    textAlign: "center",
+    color: "#2c3e50",
+  },
+  modalContent: {
+    maxHeight: height * 0.6, // Limit height to avoid overflowing the screen
+  },
+  modalGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+  },
+  modalGridItem: {
+    width: "48%", // Two items per row on smaller screens
+    marginBottom: 15,
+  },
+  modalButtons: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    width: "100%",
+    marginTop: 20,
+  },
+  modalButton: {
+    backgroundColor: colors.primary,
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    elevation: 2,
+  },
+  // New style for row details
+  rowDetails: {
+    flex: 1,
+    padding: 10,
+  },
+  detailText: {
+    fontSize: 14,
+    color: "#333",
+  },
+  editButton: {
+    // Style for the edit button
+    padding: 8,
+    marginLeft: 5,
+  },
+  // Styles for horizontal scrolling
+  tableScrollView: {
+    width: "100%",
+    overflowX: "scroll", // Ensure horizontal scroll is enabled
+  },
+  table: {
+    flexDirection: "column",
+  },
+  radioGroup: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  radioButton: {
+    flex: 1,
+    backgroundColor: "#e2e8f0",
+    paddingVertical: 10,
+    borderRadius: 20, // Make it round
+    marginHorizontal: 5,
+    alignItems: "center",
+  },
+  radioButtonSelected: {
+    backgroundColor: colors.primary,
+  },
+  radioButtonText: {
+    color: "#718096",
+    fontWeight: "500",
+  },
+  radioButtonTextSelected: {
+    color: "#fff",
+    fontWeight: "bold",
+  },
+  paymentModeContainer: {
+    width: "100%",
+    marginBottom: 15,
+  },
+});
+
+export default PaymentVoucher;
