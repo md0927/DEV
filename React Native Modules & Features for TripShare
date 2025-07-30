@@ -1,0 +1,164 @@
+
+
+## 📦 **React Native Modules & Features for TripShare**
+
+---
+
+### 1. 🔐 **Auth Module**
+
+Handles user authentication and onboarding.
+
+**Features:**
+
+* Sign Up / Login (with Firebase Auth)
+* Social login (Google/Apple – optional)
+* Forgot Password / Reset
+* JWT-based secure token handling
+* Auth persistence using AsyncStorage
+
+---
+
+### 2. 🧳 **Itinerary Module**
+
+Core module to browse, create, and manage travel plans.
+
+**Features:**
+
+* View itineraries by city, budget, interest
+* Create a new itinerary (title, days, budget, notes)
+* Add places (location, description, images, tags)
+* Edit or delete plans
+* Bookmark/save for offline access
+
+---
+
+### 3. 💸 **Expense Tracking Module**
+
+Tracks travel expenses and visualizes budgets.
+
+**Features:**
+
+* Add daily or place-wise expenses
+* Categorize (food, stay, transport, etc.)
+* Upload receipt images (via Cloudinary)
+* Auto calculate total + remaining budget
+* Offline tracking using SQLite
+
+---
+
+### 4. 📍 **Places & Map Module**
+
+Integration of maps and discovery features.
+
+**Features:**
+
+* View nearby attractions using Google Places API
+* MapView with markers for itinerary locations
+* Show distance, ratings, and cost range
+* Filter by category (food, hotels, etc.)
+
+---
+
+### 5. 🤝 **Travel Buddy Module**
+
+Find and connect with travelers on similar paths.
+
+**Features:**
+
+* Match users by destination/date overlap
+* View user profiles
+* Chat (optional integration – e.g., Firebase Firestore)
+* Send trip invite or join request
+
+---
+
+### 6. 📂 **Saved & Offline Module**
+
+Stores selected data offline for low-network regions.
+
+**Features:**
+
+* Save itineraries and expenses locally
+* SQLite DB for offline access
+* Sync when back online
+* View offline mode status
+
+---
+
+### 7. 🔔 **Notification Module**
+
+Push and in-app notifications for updates and reminders.
+
+**Features:**
+
+* Receive itinerary changes/reminders
+* Push via Firebase Cloud Messaging
+* In-app alert display
+
+---
+
+### 8. 🧑‍💼 **User Profile Module**
+
+User details, history, settings.
+
+**Features:**
+
+* View/edit profile (photo, username, bio)
+* View trip history
+* Change password, logout
+* Language or theme toggle (optional)
+
+---
+
+### 9. ⚙️ **Settings & Preferences Module**
+
+Customize app behavior and preferences.
+
+**Features:**
+
+* Enable dark mode
+* Notification preferences
+* Budget alert thresholds
+* Data sync and clear cache
+
+---
+
+### Bonus (Optional Modules)
+
+#### 📊 Analytics Module
+
+* Track trip costs vs. budget visually
+* Trip insights (most visited type of place, avg. spend/day)
+
+#### 🌐 Localization Module
+
+* Multi-language support
+* Currency formatting per region
+
+---
+
+## 📁 Recommended Folder Structure in `frontend/src/`
+
+```
+/src
+ ┣ /modules
+ ┃ ┣ /auth
+ ┃ ┣ /itinerary
+ ┃ ┣ /expenses
+ ┃ ┣ /places
+ ┃ ┣ /buddies
+ ┃ ┣ /offline
+ ┃ ┣ /profile
+ ┃ ┣ /notifications
+ ┃ ┗ /settings
+ ┣ /components
+ ┣ /store (Zustand)
+ ┣ /services (API, Firebase, Maps)
+ ┣ /assets (icons, images)
+ ┣ /utils
+ ┗ App.js
+```
+
+---
+
+Let me know if you want starter code for any of these modules (e.g., itinerary creation or expense tracking).
